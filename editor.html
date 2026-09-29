@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>교안 편집기</title>
+<style>
+:root{
+  --bg:#F2EEE6; --panel:#FFFDF8; --line:#DDD5C6; --ink:#23211E; --ink2:#6B655B;
+  --accent:#C8603F; --accent-d:#A24A2C; --accent-s:#F5E2D8; --ok:#5D7045;
+  --f:'Apple SD Gothic Neo','Malgun Gothic','맑은 고딕','NanumSquareRound',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font-family:var(--f);color:var(--ink);background:var(--bg)}
+body{display:grid;grid-template-rows:auto 1fr;height:100vh;overflow:hidden}
+header{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+button{font:inherit;font-size:14px;border:1px solid var(--line);background:#fff;color:var(--ink);padding:6px 11px;border-radius:8px;cursor:pointer;white-space:nowrap}
+button:hover:not(:disabled){border-color:var(--ink2)}
+button:disabled{opacity:.4;cursor:default}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button.main{background:var(--ink);border-color:var(--ink);color:#fff}
+.sep{width:1px;height:24px;background:var(--line);margin:0 4px}
+#fname{font-weight:700;max-width:30ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#fname:empty::before{content:'파일 없음';color:var(--ink2);font-weight:400}
+#dirty{color:var(--accent);font-size:13px;display:none}
+body.changed #dirty{display:inline}
+#pos{min-width:64px;text-align:center;font-variant-numeric:tabular-nums;font-size:14px}
+#status{font-size:13px;color:var(--ink2);margin-left:auto;max-width:48ch;text-align:right}
+main{display:grid;grid-template-columns:1fr 340px;min-height:0}
+body.nopanel main{grid-template-columns:1fr}
+body.nopanel #panel{display:none}
+#viewwrap{position:relative;min-height:0;background:#E7E0D3}
+#view{width:100%;height:100%;border:0;display:block}
+body.editing #viewwrap{box-shadow:inset 0 0 0 3px var(--accent)}
+#drop{position:absolute;inset:0;display:grid;place-items:center;background:rgba(242,238,230,.94);z-index:5;text-align:center;padding:24px}
+#drop .box{border:2px dashed var(--line);border-radius:18px;padding:48px 40px;max-width:520px;background:var(--panel)}
+#drop h1{font-size:24px;margin:0 0 10px}
+#drop p{margin:6px 0;color:var(--ink2);line-height:1.6}
+body.loaded #drop{display:none}
+body.dragging #drop{display:grid;border:4px solid var(--accent)}
+#panel{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:14px 14px 40px;font-size:14px}
+#panel h3{font-size:13px;color:var(--ink2);margin:18px 0 8px;letter-spacing:.02em}
+#panel h3:first-child{margin-top:0}
+#cur{font-weight:700;font-size:15px;line-height:1.4}
+#note{min-height:140px;max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;line-height:1.6;font:inherit;font-size:14px;width:100%;resize:vertical}
+#note[contenteditable]:focus,textarea#note:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.muted{color:var(--ink2);font-size:13px;line-height:1.5}
+label.f{display:block;margin:8px 0}
+label.f span{display:block;font-size:12px;color:var(--ink2);margin-bottom:3px}
+label.f input{width:100%;font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:6px}
+#slides{position:relative;list-style:none;margin:0;padding:0;max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+#slides li{padding:5px 8px;cursor:pointer;display:flex;gap:8px;border-bottom:1px solid #F0EBE1}
+#slides li:hover{background:var(--bg)}
+#slides li.cur{background:var(--accent-s);font-weight:700}
+#slides li .n{color:var(--ink2);min-width:2.2em;text-align:right}
+.hide{display:none!important}
+kbd{font:inherit;font-size:12px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:#fff}
+@media (max-width:820px){main{grid-template-columns:1fr}#panel{display:none}}
+</style>
+</head>
+<body class="nopanel">
+<header>
+  <button id="bopen" class="main" title="HTML 파일 열기">📂 열기</button>
+  <span id="fname"></span><span id="dirty">● 저장 안 됨</span>
+  <span class="sep"></span>
+  <button id="bedit" disabled title="글자를 클릭해서 바로 고칩니다">✏️ 편집 모드</button>
+  <span class="sep"></span>
+  <button id="bprev" disabled title="이전 장 (편집 중: PageUp)">◀</button>
+  <span id="pos">–</span>
+  <button id="bnext" disabled title="다음 장 (편집 중: PageDown)">▶</button>
+  <span class="sep"></span>
+  <button id="bsave" disabled title="Ctrl+S">💾 저장</button>
+  <button id="bsaveas" disabled title="새 파일로 내려받기">⬇ 다른 이름으로</button>
+  <button id="bpdf" disabled title="인쇄 창에서 'PDF로 저장'을 고르세요">📄 PDF</button>
+  <span class="sep"></span>
+  <button id="bpanel" disabled title="노트·목록·설정 패널">☰ 패널</button>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="viewwrap">
+    <iframe id="view" title="교안 미리보기"></iframe>
+    <div id="drop"><div class="box">
+      <h1>교안·지도안 HTML 파일을 여기에 끌어다 놓으세요</h1>
+      <p>또는 왼쪽 위 <b>📂 열기</b>를 누르세요.</p>
+      <p class="muted">파일은 이 컴퓨터 안에서만 열리고, 어디에도 올라가지 않아요.</p>
+    </div></div>
+  </div>
+  <aside id="panel">
+    <div id="deckpart">
+      <h3>지금 보는 장</h3>
+      <div id="cur">–</div>
+      <h3>발표자 노트</h3>
+      <div id="notewrap"></div>
+      <h3>장 목록</h3>
+      <ul id="slides"></ul>
+    </div>
+    <h3>문서 정보</h3>
+    <label class="f"><span>문서 제목 (브라우저 탭에 보이는 이름)</span><input id="ftitle"></label>
+    <div id="cfgpart"></div>
+    <h3>도움말</h3>
+    <p class="muted">
+      <b>✏️ 편집 모드</b>를 켜면 점선 테두리가 생긴 글자를 바로 고칠 수 있어요.
+      편집 중에는 교안의 단축키가 멈추고, 장 이동은 ◀ ▶ 또는 <kbd>PageUp</kbd>/<kbd>PageDown</kbd>으로 해요.<br>
+      파란 점선이 보이는 사진 자리는 클릭하면 사진을 바꿀 수 있어요.<br>
+      <kbd>Ctrl</kbd>+<kbd>S</kbd> 저장 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 되돌리기 · <kbd>Ctrl</kbd>+<kbd>B</kbd> 굵게
+    </p>
+  </aside>
+</main>
+<input type="file" id="fpick" accept=".html,.htm,text/html" class="hide">
+<input type="file" id="ipick" accept="image/*" class="hide">
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const view = $('#view');
+
+/* 상태 ------------------------------------------------------------- */
+const S = {
+  name: '', handle: null,          // 열어 둔 파일 이름·핸들(덮어쓰기용)
+  orig: null,                       // 원본 문서(스크립트가 실행되지 않은 상태). 저장은 항상 여기서 한다
+  editing: false, bypass: false,
+  dirty: new Set(),                 // 고친 글자 덩어리(data-eid)
+  changed: false,
+  mode: 'doc',                      // 'deck'(슬라이드) | 'doc'(문서)
+  slides: [], stage: null, activeCls: [],
+  roots: null, cfg: null, lastIdx: -1,
+};
+
+const EID = 'data-eid';
+const byEid = (doc, id) => doc.querySelector('[' + EID + '="' + id + '"]');
+const frame = () => new Promise(r => requestAnimationFrame(() => r()));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function status(msg, ms) {
+  $('#status').textContent = msg || '';
+  clearTimeout(status.t);
+  if (ms) status.t = setTimeout(() => ($('#status').textContent = ''), ms);
+}
+function markChanged(v = true) { S.changed = v; document.body.classList.toggle('changed', v); }
+
+/* 파일 열기 --------------------------------------------------------- */
+async function openDialog() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await showOpenFilePicker({ types: [{ description: 'HTML', accept: { 'text/html': ['.html', '.htm'] } }] });
+      return openFile(await h.getFile(), h);
+    } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  $('#fpick').click();
+}
+$('#fpick').onchange = e => { const f = e.target.files[0]; if (f) openFile(f, null); e.target.value = ''; };
+
+async function openFile(file, handle) {
+  if (S.changed && !confirm('저장하지 않은 수정 내용이 있어요. 버리고 다른 파일을 열까요?')) return;
+  const text = await file.text();
+  const doc = new DOMParser().parseFromString(text, 'text/html');
+  // 모든 요소에 번호를 붙여 둔다. 화면(스크립트 실행 후)과 원본을 이 번호로 짝짓는다.
+  let n = 0;
+  doc.querySelectorAll('*').forEach(el => el.setAttribute(EID, ++n));
+  Object.assign(S, { orig: doc, name: file.name, handle, roots: null, cfg: findConfig(doc), lastIdx: -1 });
+  S.dirty.clear(); markChanged(false);
+  $('#fname').textContent = file.name;
+  document.title = file.name + ' · 교안 편집기';
+  document.body.classList.add('loaded');
+  buildDocPanel();
+  render(0);
+}
+
+/* 미리보기에 띄우기 -------------------------------------------------- */
+function render(idx) {
+  // srcdoc 안에서는 주소(#3 같은)를 바꿀 수 없어 교안 스크립트가 멈추지 않도록 감싸 준다. 저장 파일에는 들어가지 않는다.
+  const shim = '<script>(function(){["replaceState","pushState"].forEach(function(k){var f=history[k];' +
+    'history[k]=function(){try{return f.apply(history,arguments)}catch(e){}}})})()<\/script>';
+  const html = '<!doctype html>\n' + S.orig.documentElement.outerHTML.replace(/<head([^>]*)>/i, m => m + shim);
+  S.roots = null;
+  status('불러오는 중…');
+  view.onload = () => setTimeout(() => onFrameReady(idx), 250);
+  view.srcdoc = html;
+}
+
+async function onFrameReady(idx) {
+  let d;
+  try { d = view.contentDocument; d.body; } catch (e) { d = null; }
+  if (!d) { status('이 브라우저에서는 파일을 열 수 없어요. 크롬이나 엣지로 열어 주세요.'); return; }
+  const w = view.contentWindow;
+  installGuards(w);
+  detectSlides(d);
+  document.body.classList.toggle('nopanel', false);
+  $('#deckpart').classList.toggle('hide', S.mode !== 'deck');
+  ['#bedit', '#bsave', '#bsaveas', '#bpdf', '#bpanel'].forEach(s => ($(s).disabled = false));
+  ['#bprev', '#bnext'].forEach(s => ($(s).disabled = S.mode !== 'deck'));
+  if (S.mode === 'deck') {
+    buildSlideList();
+    new MutationObserver(() => refreshDeckUI()).observe(S.stage, { attributes: true, subtree: true, attributeFilter: ['class', 'style'] });
+    if (idx) await goTo(idx);
+  }
+  if (S.editing) enableEdit();
+  refreshDeckUI(true);
+  w.addEventListener('dragenter', e => {
+    if (e.dataTransfer && [...e.dataTransfer.types].includes('Files') && !(S.editing && imgTarget(e.target)) && !e.target.closest?.('[data-src],.ph,.media'))
+      document.body.classList.add('dragging');
+  }, true);
+  status(S.mode === 'deck' ? '슬라이드 ' + S.slides.length + '장을 찾았어요.' : '문서로 열었어요.', 4000);
+}
+
+/* 교안 단축키·클릭을 편집 중에만 막는다 -------------------------------- */
+function installGuards(w) {
+  const keys = e => {
+    if (S.bypass) return;
+    if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === 's') {
+      e.preventDefault(); e.stopImmediatePropagation(); if (e.type === 'keydown') save(); return;
+    }
+    if (!S.editing) return;
+    if (e.type === 'keydown' && (e.key === 'PageDown' || e.key === 'PageUp')) {
+      e.preventDefault(); step(e.key === 'PageDown' ? 1 : -1);
+    }
+    e.stopImmediatePropagation();
+  };
+  ['keydown', 'keyup', 'keypress'].forEach(t => w.addEventListener(t, keys, true));
+  const ptr = e => {
+    if (!S.editing) return;
+    if (e.type === 'click') {
+      const t = imgTarget(e.target);
+      if (t) { e.preventDefault(); pickImage(t); }
+      else if (e.target.closest && e.target.closest('a[href]')) e.preventDefault();
+    }
+    e.stopImmediatePropagation();
+  };
+  ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend']
+    .forEach(t => w.addEventListener(t, ptr, true));
+  w.document.addEventListener('input', e => {
+    const r = e.target.closest && e.target.closest('[data-pe-ed]');
+    if (r) { S.dirty.add(r.getAttribute(EID)); markChanged(); }
+  }, true);
+  w.document.addEventListener('paste', e => {
+    if (!S.editing) return;
+    e.preventDefault();
+    w.document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+  }, true);
+}
+
+/* 슬라이드 찾기 ----------------------------------------------------- */
+function shown(el) {
+  const cs = el.ownerDocument.defaultView.getComputedStyle(el);
+  return cs.display !== 'none' && cs.visibility !== 'hidden' && el.getClientRects().length > 0;
+}
+function detectSlides(d) {
+  S.mode = 'doc'; S.slides = []; S.stage = null; S.activeCls = [];
+  for (const sel of ['section.slide', '.slide', 'section']) {
+    const all = [...d.querySelectorAll(sel)].filter(el => el.hasAttribute(EID));
+    if (all.length < 2) continue;
+    const parent = all[0].parentElement;
+    const list = all.filter(el => el.parentElement === parent);
+    if (list.length < 2) continue;
+    const vis = list.filter(shown);
+    if (vis.length > 1) continue;                        // 모두 보이면 슬라이드가 아니라 문서
+    S.mode = 'deck'; S.slides = list; S.stage = parent;
+    const on = vis[0];
+    if (on) {
+      const off = list.find(s => s !== on);
+      S.activeCls = [...on.classList].filter(c => !off.classList.contains(c));
+    }
+    return;
+  }
+}
+const cur = () => Math.max(0, S.slides.findIndex(shown));
+function slideTitle(s, i) {
+  const t = s.dataset.title || (s.querySelector('h1,h2,h3') || {}).textContent || '';
+  return t.replace(/\s+/g, ' ').trim() || (i + 1) + '번째 장';
+}
+
+/* 장 이동: 교안이 원래 쓰는 방향키를 대신 눌러 준다 --------------------- */
+function press(key) {
+  const d = view.contentDocument, w = view.contentWindow;
+  if (d.activeElement && d.activeElement !== d.body) d.activeElement.blur();
+  S.bypass = true;
+  try { d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true })); }
+  finally { S.bypass = false; }
+}
+async function goTo(n) {
+  if (S.mode !== 'deck') return;
+  n = Math.max(0, Math.min(S.slides.length - 1, n));
+  let last = cur(), stuck = 0;
+  for (let t = 0; t < 400 && cur() !== n; t++) {
+    press(cur() < n ? 'ArrowRight' : 'ArrowLeft');
+    await frame();
+    const c = cur();
+    if (c === last) { if (++stuck > 12) break; } else { stuck = 0; last = c; }
+  }
+  if (cur() !== n && S.activeCls.length) {           // 방향키가 안 먹는 교안이면 직접 바꾼다
+    const a = S.slides[cur()], b = S.slides[n];
+    S.activeCls.forEach(c => { a.classList.remove(c); b.classList.add(c); });
+  }
+  refreshDeckUI();
+}
+const step = k => goTo(cur() + k);
+
+/* 오른쪽 패널 ------------------------------------------------------- */
+function buildSlideList() {
+  const ul = $('#slides'); ul.innerHTML = '';
+  S.slides.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="n"></span><span></span>';
+    li.firstChild.textContent = i + 1;
+    li.lastChild.textContent = slideTitle(s, i);
+    li.onclick = () => goTo(i);
+    ul.appendChild(li);
+  });
+}
+function refreshDeckUI(force) {
+  if (S.mode !== 'deck') { $('#pos').textContent = '–'; return; }
+  const i = cur();
+  $('#pos').textContent = (i + 1) + ' / ' + S.slides.length;
+  if (i === S.lastIdx && !force) return;
+  S.lastIdx = i;
+  $('#cur').textContent = (i + 1) + '. ' + slideTitle(S.slides[i], i);
+  [...$('#slides').children].forEach((li, k) => li.classList.toggle('cur', k === i));
+  const ul = $('#slides'), li = ul.children[i];
+  if (li && (li.offsetTop < ul.scrollTop || li.offsetTop + li.offsetHeight > ul.scrollTop + ul.clientHeight))
+    ul.scrollTop = li.offsetTop - ul.clientHeight / 2;
+  buildNoteEditor(i);
+}
+
+function notesOf(slide) { return slide && slide.querySelector('template.note, template.notes, aside.notes, .notes, .note'); }
+function buildNoteEditor(i) {
+  const wrap = $('#notewrap'); wrap.innerHTML = '';
+  const oSlide = byEid(S.orig, S.slides[i].getAttribute(EID));
+  const o = notesOf(oSlide);
+  if (!o) { wrap.innerHTML = '<p class="muted">이 장에는 노트 자리가 없어요.</p>'; return; }
+  const live = byEid(view.contentDocument, o.getAttribute(EID));
+  let ed;
+  if (o.tagName === 'TEMPLATE') {                      // <template> 노트는 글자만 담는다
+    ed = document.createElement('textarea');
+    ed.value = o.content.textContent.trim();
+    ed.oninput = () => {
+      o.content.textContent = ed.value;
+      if (live) live.content.textContent = ed.value;
+      markChanged();
+    };
+  } else {
+    ed = document.createElement('div');
+    ed.contentEditable = 'true';
+    ed.innerHTML = o.innerHTML.trim();
+    ed.oninput = () => {
+      o.innerHTML = '\n    ' + ed.innerHTML + '\n  ';
+      if (live) live.innerHTML = o.innerHTML;
+      markChanged();
+    };
+  }
+  ed.id = 'note'; ed.spellcheck = false;
+  wrap.appendChild(ed);
+}
+
+/* 문서 제목·CONFIG ---------------------------------------------------- */
+function findConfig(doc) {
+  for (const s of doc.querySelectorAll('script:not([src])')) {
+    const m = s.textContent.match(/const\s+CONFIG\s*=\s*(\{[\s\S]*?\})\s*;/);
+    if (!m) continue;
+    try { return { script: s, raw: m[0], obj: JSON.parse(m[1]) }; } catch (e) { /* JSON 모양이 아니면 건너뜀 */ }
+  }
+  return null;
+}
+const CFG_LABEL = { week: '주차', date: '날짜', time: '교시', place: '장소', grade: '학년', class: '반', teacher: '선생님', school: '학교' };
+function buildDocPanel() {
+  const t = S.orig.querySelector('title');
+  $('#ftitle').value = t ? t.textContent : '';
+  const box = $('#cfgpart'); box.innerHTML = '';
+  if (!S.cfg) return;
+  box.innerHTML = '<h3>공통 정보 (모든 장에 한 번에 바뀌어요)</h3>';
+  Object.entries(S.cfg.obj).forEach(([k, v]) => {
+    if (v !== null && typeof v === 'object') return;
+    const l = document.createElement('label'); l.className = 'f';
+    l.innerHTML = '<span></span><input>';
+    l.firstChild.textContent = CFG_LABEL[k] ? CFG_LABEL[k] + ' (' + k + ')' : k;
+    const inp = l.lastChild; inp.value = v;
+    inp.onchange = () => {
+      S.cfg.obj[k] = typeof v === 'number' && inp.value.trim() !== '' && !isNaN(+inp.value) ? +inp.value : inp.value;
+      const raw = 'const CONFIG=' + JSON.stringify(S.cfg.obj) + ';';
+      S.cfg.script.textContent = S.cfg.script.textContent.replace(S.cfg.raw, () => raw);
+      S.cfg.raw = raw;
+      markChanged(); reload();
+    };
+    box.appendChild(l);
+  });
+}
+$('#ftitle').onchange = () => {
+  let t = S.orig.querySelector('title');
+  if (!t) { t = S.orig.createElement('title'); S.orig.head.appendChild(t); }
+  t.textContent = $('#ftitle').value; markChanged();
+};
+
+/* 편집 모드 --------------------------------------------------------- */
+const SKIP = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'IFRAME', 'CANVAS', 'VIDEO', 'AUDIO', 'SELECT', 'TEXTAREA', 'INPUT', 'svg', 'IMG']);
+const INLINE = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'SPAN', 'MARK', 'SMALL', 'SUB', 'SUP', 'BR', 'A', 'CODE', 'KBD', 'ABBR', 'Q', 'WBR']);
+const directText = el => [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+const inlineOnly = el => el.textContent.trim() && [...el.children].every(c => INLINE.has(c.tagName) && inlineOnly2(c));
+const inlineOnly2 = el => [...el.children].every(c => INLINE.has(c.tagName) && inlineOnly2(c));
+
+// 고칠 수 있는 글자 덩어리를 고른다. 스크립트가 만들었거나 바꾼 부분은 저장할 때 원본과 어긋나므로 뺀다.
+function computeRoots() {
+  const d = view.contentDocument, roots = [];
+  const origMap = new Map();
+  S.orig.querySelectorAll('[' + EID + ']').forEach(el => origMap.set(el.getAttribute(EID), el));
+  const walk = el => {
+    for (const ch of el.children) {
+      if (SKIP.has(ch.tagName) || ch.matches('.notes,.note,[data-src],[data-cfg],button')) continue;
+      const o = origMap.get(ch.getAttribute(EID));
+      if (!o) continue;                                  // 스크립트가 새로 만든 요소
+      if ((directText(ch) || inlineOnly(ch)) && ch.innerHTML === o.innerHTML) { roots.push(ch); continue; }
+      walk(ch);
+    }
+  };
+  if (S.mode === 'deck') S.slides.forEach(walk); else walk(d.body);
+  return roots;
+}
+const EDIT_CSS = `
+[data-pe-ed]{outline:1.5px dashed rgba(200,96,63,.55);outline-offset:3px;cursor:text}
+[data-pe-ed]:hover{outline-color:rgba(200,96,63,.9)}
+[data-pe-ed]:focus{outline:2.5px solid #C8603F;outline-offset:3px;background:rgba(255,248,240,.55)}
+[data-pe-img]{outline:3px dashed #4A7FB5!important;outline-offset:-3px;cursor:copy!important}`;
+function enableEdit() {
+  const d = view.contentDocument;
+  if (!d) return;
+  S.roots = S.roots || computeRoots();
+  S.roots.forEach(r => { r.setAttribute('contenteditable', 'true'); r.setAttribute('data-pe-ed', ''); r.spellcheck = false; });
+  const scope = S.mode === 'deck' ? S.slides : [d.body];
+  scope.forEach(s => s.querySelectorAll('img[' + EID + '],[data-src][' + EID + ']').forEach(el => {
+    if (!(el.tagName === 'IMG' && el.parentElement.closest('[data-src]'))) el.setAttribute('data-pe-img', '');
+  }));
+  let st = d.getElementById('pe-edit-css');
+  if (!st) { st = d.createElement('style'); st.id = 'pe-edit-css'; d.head.appendChild(st); }
+  st.textContent = EDIT_CSS;
+  status('편집 모드: 점선 글자를 클릭해서 고치세요. (고칠 수 있는 곳 ' + S.roots.length + '군데)', 6000);
+}
+function disableEdit() {
+  const d = view.contentDocument;
+  if (!d) return;
+  d.querySelectorAll('[data-pe-ed]').forEach(r => { r.removeAttribute('contenteditable'); r.removeAttribute('data-pe-ed'); });
+  d.querySelectorAll('[data-pe-img]').forEach(r => r.removeAttribute('data-pe-img'));
+  d.getElementById('pe-edit-css')?.remove();
+  if (d.activeElement && d.activeElement !== d.body) d.activeElement.blur();
+}
+function setEditing(v) {
+  S.editing = v;
+  $('#bedit').classList.toggle('on', v);
+  $('#bedit').textContent = v ? '✏️ 편집 중 (끄기)' : '✏️ 편집 모드';
+  document.body.classList.toggle('editing', v);
+  v ? enableEdit() : (disableEdit(), status('보기 모드: 교안의 원래 단축키로 넘겨 볼 수 있어요.', 4000));
+}
+
+// 화면에서 고친 글자를 원본 문서에 옮긴다
+function syncDirty() {
+  const d = view.contentDocument;
+  for (const id of S.dirty) {
+    const live = d && byEid(d, id), o = byEid(S.orig, id);
+    if (live && o) o.innerHTML = live.innerHTML;
+  }
+  S.dirty.clear();
+}
+function reload() { syncDirty(); const i = S.mode === 'deck' ? cur() : 0; render(i); }
+
+/* 사진 바꾸기 ------------------------------------------------------- */
+function imgTarget(t) {
+  for (let el = t; el && el.nodeType === 1; el = el.parentElement)
+    if (el.hasAttribute('data-pe-img')) return el;
+  return null;
+}
+let imgFor = null;
+function pickImage(el) { imgFor = el.getAttribute(EID); $('#ipick').click(); }
+$('#ipick').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f || !imgFor) return;
+  const url = await shrink(f);
+  const o = byEid(S.orig, imgFor);
+  if (!o) return;
+  if (o.tagName === 'IMG') o.setAttribute('src', url); else o.setAttribute('data-src', url);
+  markChanged(); reload();
+  status('사진을 바꿨어요. 사진은 파일 안에 함께 저장돼요.', 5000);
+};
+// 큰 사진은 가로·세로 1600px 이하 JPEG로 줄여서 파일이 너무 커지지 않게 한다
+function shrink(file) {
+  return new Promise(res => {
+    const r = new FileReader();
+    r.onload = () => {
+      if (file.size < 400 * 1024 || file.type === 'image/svg+xml' || file.type === 'image/gif') return res(r.result);
+      const im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, 1600 / Math.max(im.width, im.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        const g = c.getContext('2d');
+        const png = file.type === 'image/png';
+        if (!png) { g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); }
+        g.drawImage(im, 0, 0, c.width, c.height);
+        res(png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85));
+      };
+      im.onerror = () => res(r.result);
+      im.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+/* 저장 ------------------------------------------------------------- */
+function cleanHtml() {
+  syncDirty();
+  const c = S.orig.cloneNode(true);
+  c.querySelectorAll('[' + EID + ']').forEach(el => el.removeAttribute(EID));
+  return '<!doctype html>\n' + c.documentElement.outerHTML + '\n';
+}
+async function save() {
+  if (!S.orig) return;
+  const html = cleanHtml();
+  if (S.handle && S.handle.createWritable) {
+    try {
+      if ((await S.handle.requestPermission?.({ mode: 'readwrite' })) === 'denied') throw new Error('denied');
+      const w = await S.handle.createWritable();
+      await w.write(html); await w.close();
+      markChanged(false); status('원래 파일에 저장했어요: ' + S.name, 5000);
+      return;
+    } catch (e) { /* 권한이 없으면 내려받기로 */ }
+  }
+  download(html, S.name);
+}
+function download(html, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+  a.download = name || 'lesson.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  markChanged(false); status('내려받기 폴더에 저장했어요: ' + a.download, 6000);
+}
+function saveAs() {
+  const base = (S.name || 'lesson.html').replace(/\.html?$/i, '');
+  const name = prompt('저장할 파일 이름', base + ' (수정).html');
+  if (name) download(cleanHtml(), /\.html?$/i.test(name) ? name : name + '.html');
+}
+
+/* PDF: 화면을 그대로 떠서(스크립트 제외) 모든 장을 한 페이지씩 펼친 뒤 인쇄 --- */
+function buildPrintHtml() {
+  syncDirty();
+  const d = view.contentDocument;
+  const marks = [];
+  const mark = (el, a) => { el.setAttribute(a, ''); marks.push([el, a]); };
+  const hasPage = [...S.orig.querySelectorAll('style')].some(s => /@page/.test(s.textContent));
+  let css, W = 794, H = 1123;
+  if (S.mode === 'deck') {
+    const on = S.slides[cur()];
+    W = on.offsetWidth || 1280; H = on.offsetHeight || 720;
+    let D = d.defaultView.getComputedStyle(on).display;
+    if (D === 'none') D = 'block';
+    S.slides.forEach(s => mark(s, 'data-pe-slide'));
+    for (const c of S.stage.children) if (!S.slides.includes(c) && !/^(SCRIPT|STYLE|LINK|TEMPLATE)$/.test(c.tagName) && c.tagName !== 'svg') mark(c, 'data-pe-hide');
+    for (let el = S.stage; el && el !== d.documentElement; el = el.parentElement) {
+      if (el !== d.body) mark(el, 'data-pe-path');
+      const p = el.parentElement;
+      if (p && p !== d.documentElement) for (const c of p.children)
+        if (c !== el && !/^(SCRIPT|STYLE|LINK|TEMPLATE|META)$/.test(c.tagName) && c.tagName !== 'svg') mark(c, 'data-pe-hide');
+    }
+    css = `
+@page{size:${W}px ${H}px;margin:0}
+html,body{width:${W}px!important;height:auto!important;min-height:0!important;overflow:visible!important;margin:0!important;padding:0!important}
+[data-pe-hide],.notes,aside.notes,template{display:none!important}
+[data-pe-path]{position:static!important;transform:none!important;margin:0!important;inset:auto!important;width:${W}px!important;height:auto!important;min-height:0!important;overflow:visible!important;box-shadow:none!important}
+[data-pe-slide]{display:${D}!important;position:relative!important;inset:auto!important;left:auto!important;top:auto!important;width:${W}px!important;height:${H}px!important;min-height:0!important;overflow:hidden!important;transform:none!important;opacity:1!important;visibility:visible!important;break-after:page;page-break-after:always;break-inside:avoid}
+[data-pe-slide]:last-of-type{break-after:auto;page-break-after:auto}`;
+  } else {
+    css = `${hasPage ? '' : '@page{size:A4;margin:12mm}'}
+html,body{height:auto!important;overflow:visible!important}`;
+  }
+  css += `
+*,*::before,*::after{animation:none!important;transition:none!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+[data-pe-ed],[data-pe-img]{outline:none!important;background-color:inherit}`;
+  const c = d.documentElement.cloneNode(true);
+  marks.forEach(([el, a]) => el.removeAttribute(a));
+  c.querySelectorAll('script,#pe-edit-css').forEach(s => s.remove());
+  c.querySelectorAll('[contenteditable]').forEach(e => e.removeAttribute('contenteditable'));
+  if (S.mode === 'deck') c.querySelectorAll('[data-pe-slide]').forEach(s => S.activeCls.forEach(k => s.classList.add(k)));
+  const st = d.createElement('style'); st.textContent = css;
+  (c.querySelector('head') || c).appendChild(st);
+  return { html: '<!doctype html>\n' + c.outerHTML, W, H };
+}
+function printPdf() {
+  if (!S.orig) return;
+  const { html, W, H } = buildPrintHtml();
+  const f = document.createElement('iframe');
+  f.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;height:${H}px;border:0`;
+  document.body.appendChild(f);
+  status('PDF 준비 중… 인쇄 창에서 대상을 “PDF로 저장”으로 고르세요.', 10000);
+  f.onload = async () => {
+    const fd = f.contentDocument;
+    try {
+      await Promise.race([fd.fonts ? fd.fonts.ready : 0, sleep(3000)]);
+      await Promise.race([Promise.all([...fd.images].map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; }))), sleep(4000)]);
+    } catch (e) { /* 그래도 인쇄 */ }
+    await sleep(200);
+    const done = () => setTimeout(() => f.remove(), 500);
+    f.contentWindow.addEventListener('afterprint', done);
+    setTimeout(done, 120000);
+    f.contentWindow.focus();
+    f.contentWindow.print();
+  };
+  f.srcdoc = html;
+}
+
+/* 버튼 ------------------------------------------------------------- */
+$('#bopen').onclick = openDialog;
+$('#bedit').onclick = () => setEditing(!S.editing);
+$('#bprev').onclick = () => step(-1);
+$('#bnext').onclick = () => step(1);
+$('#bsave').onclick = save;
+$('#bsaveas').onclick = saveAs;
+$('#bpdf').onclick = printPdf;
+$('#bpanel').onclick = () => document.body.classList.toggle('nopanel');
+addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); openDialog(); }
+});
+addEventListener('beforeunload', e => { if (S.changed) { e.preventDefault(); e.returnValue = ''; } });
+
+/* 끌어다 놓기 ------------------------------------------------------- */
+addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
+addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+addEventListener('drop', async e => {
+  e.preventDefault(); document.body.classList.remove('dragging');
+  const it = [...(e.dataTransfer.items || [])].find(i => i.kind === 'file');
+  if (!it) return;
+  // DataTransfer는 첫 await 뒤에 비워지므로 파일과 핸들을 먼저 꺼내 둔다
+  let f = it.getAsFile(), handle = null;
+  const hp = it.getAsFileSystemHandle ? it.getAsFileSystemHandle() : null;
+  try { handle = hp && await hp; } catch (err) { handle = null; }
+  if (handle && handle.kind !== 'file') handle = null;
+  if (f && /\.html?$/i.test(f.name)) openFile(f, handle); else status('HTML 파일만 열 수 있어요.', 4000);
+});
+
+// 테스트·자동화용
+window.PE = { S, openFile, goTo, cur, setEditing, cleanHtml, buildPrintHtml, computeRoots };
+})();
+</script>
+</body>
+</html>
